@@ -1,0 +1,6 @@
+FluidR3 GM acoustic grand piano samples
+
+Source: https://github.com/gleitz/midi-js-soundfonts
+Generated from FluidR3_GM.sf2
+License: Creative Commons Attribution 3.0
+https://creativecommons.org/licenses/by/3.0/us/

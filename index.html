@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07111a">
+    <meta name="description" content="Turn chord sheets into playable two-octave piano diagrams.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%232d2650'/%3E%3Cpath d='M14 16h36v32H14zm9 0v20m9-20v20m9-20v20M18.5 36v12m9-12v12m9-12v12m9-12v12' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
+    <title>Piano Room</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div id="app" v-cloak>
+      <div class="app-shell" :style="themeStyle">
+        <div class="ambient-background" :class="backgroundClass" aria-hidden="true">
+          <span class="ambient-light light-a"></span>
+          <span class="ambient-light light-b"></span>
+          <span class="ambient-shadow"></span>
+          <span class="ambient-vignette"></span>
+          <span class="ambient-grain"></span>
+        </div>
+        <div class="workspace" :class="{ 'sidebar-collapsed': !sidebarOpen, 'settings-open': settingsOpen }">
+          <transition name="sidebar-motion">
+            <div v-show="sidebarOpen" class="sidebar-column">
+              <aside class="sidebar builder-sidebar">
+                <h2 class="panel-title">{{ title || 'Untitled chart' }}</h2>
+
+                <label class="field">
+                  <span class="field-label">Song title</span>
+                  <input class="text-input" v-model="title" type="text" autocomplete="off" maxlength="80">
+                </label>
+                <label class="field">
+                  <span class="field-label">Chords</span>
+                  <textarea class="sheet-input" v-model="source" spellcheck="false"></textarea>
+                </label>
+                <button class="primary-button" type="button" @click="buildSheet(true)">Build sheet</button>
+
+                <div class="divider"></div>
+                <div class="field">
+                  <span class="field-label">Bars per row</span>
+                  <div class="segmented" aria-label="Bars per row">
+                    <button v-for="count in 4" :key="count" class="segment-button" :class="{ active: barsPerRow === count }" type="button" :data-bars="count" @click="setBarsPerRow(count)">{{ count }}</button>
+                  </div>
+                </div>
+
+                <div class="divider"></div>
+                <label class="field">
+                  <span class="field-label">Add a chord</span>
+                  <span class="search-wrap">
+                    <svg class="icon search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                    <input class="text-input" v-model="chordSearch" type="text" placeholder="Try F#m7..." autocomplete="off" role="combobox" aria-controls="suggestions" :aria-expanded="suggestionsOpen" @focus="openSuggestions" @blur="closeSuggestions" @input="onSearchInput" @keydown="onSearchKeydown">
+                    <span class="suggestions" :class="{ open: suggestionsOpen && matchingSuggestions.length }" id="suggestions" role="listbox">
+                      <button v-for="(chord, index) in matchingSuggestions" :key="chord" class="suggestion" :class="{ active: index === suggestionIndex }" type="button" @mousedown.prevent @click="appendChord(chord)">{{ chord }}</button>
+                    </span>
+                  </span>
+                </label>
+              </aside>
+
+              <aside class="sidebar saved-sidebar">
+                <h3>Sheets saved</h3>
+                <div v-if="otherSheets.length" class="saved-list">
+                  <button v-for="sheet in otherSheets" :key="sheet.id" class="saved-sheet" type="button" @click="openSheet(sheet)">
+                    <span>{{ sheet.title || 'Untitled chart' }}</span>
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+                  </button>
+                </div>
+                <p v-else class="saved-empty">Create another sheet to see it here.</p>
+              </aside>
+            </div>
+          </transition>
+
+          <main class="content">
+            <div class="content-header">
+              <div>
+                <h1>{{ title || 'Untitled chart' }}</h1>
+              </div>
+            </div>
+
+            <div v-if="bars.length" class="bars-grid" :style="{ '--bars-per-row': barsPerRow }" aria-live="polite">
+              <article
+                v-for="(bar, barIndex) in bars"
+                :key="barIndex"
+                class="bar-card"
+                :class="{ dragging: draggedBarIndex === barIndex, 'drop-target': dragTargetIndex === barIndex && draggedBarIndex !== barIndex }"
+                @dragenter.prevent="dragOverBar(barIndex)"
+                @dragover.prevent="dragOverBar(barIndex)"
+                @drop.prevent="dropBar(barIndex)"
+              >
+                <button
+                  class="drag-handle"
+                  type="button"
+                  draggable="true"
+                  :aria-label="'Drag chord #' + (barIndex + 1) + ' to reorder. Use left and right arrow keys to move it.'"
+                  @dragstart="startBarDrag($event, barIndex)"
+                  @dragend="finishBarDrag"
+                  @keydown.left.prevent="moveBarWithKey(barIndex, -1)"
+                  @keydown.right.prevent="moveBarWithKey(barIndex, 1)"
+                ><span v-for="dot in 5" :key="dot"></span></button>
+                <div class="chords-in-bar" :class="{ multiple: bar.chords.length > 1 }">
+                  <chord-diagram
+                    v-for="(symbol, chordIndex) in bar.chords"
+                    :key="barIndex + ':' + chordIndex"
+                    :symbol="symbol"
+                    :occurrence-id="barIndex + ':' + chordIndex"
+                    :inversion="inversionFor(barIndex + ':' + chordIndex, symbol)"
+                    :octave="octaveFor(barIndex + ':' + chordIndex)"
+                    :bar-number="chordIndex === 0 ? barIndex + 1 : null"
+                    :repeated="chordIndex === 0 && bar.repeated"
+                    @set-inversion="setInversion"
+                    @set-octave="setOctave"
+                    @note-on="startChordNotes"
+                    @note-off="stopChordNotes"
+                  ></chord-diagram>
+                </div>
+              </article>
+            </div>
+            <div v-else class="empty-state">Paste a chord sheet, then choose Build sheet.</div>
+          </main>
+
+          <transition name="settings-motion">
+            <aside v-show="settingsOpen" class="sidebar settings-sidebar">
+              <div class="settings-content">
+                <h2 class="panel-title">Settings</h2>
+                <label class="setting-field">
+                  <span class="field-label">Instrument</span>
+                  <select class="settings-select" :value="instrument" @change="setInstrument($event.target.value)">
+                    <option v-for="option in instrumentOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
+                  </select>
+                </label>
+
+                <fieldset class="setting-field settings-group">
+                  <legend class="field-label">Accent color</legend>
+                  <div class="accent-grid">
+                    <button v-for="option in accentOptions" :key="option.id" class="accent-option" type="button" :aria-pressed="accentPreset === option.id" :aria-label="'Use ' + option.label + ' accent'" :style="{ '--swatch': option.hex }" @click="setAccentPreset(option.id)">
+                      <span class="swatch-dot"></span><span>{{ option.label }}</span>
+                    </button>
+                    <label class="accent-option custom-accent" :aria-pressed="accentPreset === 'custom'" :style="{ '--swatch': customAccent }">
+                      <input type="color" :value="customAccent" aria-label="Choose custom accent color" @input="setCustomAccent($event.target.value)">
+                      <span class="swatch-dot"></span><span>Custom</span>
+                    </label>
+                  </div>
+                  <label v-if="accentPreset === 'custom'" class="custom-hex-row">
+                    <span>Hex</span>
+                    <input :value="customAccent" type="text" maxlength="7" spellcheck="false" aria-label="Custom accent hex value" @change="$event.target.value = setCustomAccent($event.target.value)">
+                  </label>
+                </fieldset>
+
+                <fieldset class="setting-field settings-group">
+                  <legend class="field-label">Background</legend>
+                  <div class="background-grid">
+                    <button v-for="option in backgroundOptions" :key="option.id" class="background-option" type="button" :aria-pressed="backgroundPreset === option.id" @click="setBackgroundPreset(option.id)">
+                      <span class="background-sample" :class="'background-' + option.id" aria-hidden="true">
+                        <span class="ambient-light light-a"></span><span class="ambient-light light-b"></span><span class="ambient-shadow"></span><span class="ambient-vignette"></span><span class="ambient-grain"></span>
+                      </span>
+                      <span>{{ option.label }}</span>
+                    </button>
+                  </div>
+                </fieldset>
+
+                <div class="setting-row">
+                  <div>
+                    <span class="field-label">Sustain</span>
+                    <span class="setting-help">Keep notes ringing after release.</span>
+                  </div>
+                  <button class="switch" type="button" role="switch" :aria-checked="sustain" :aria-label="sustain ? 'Turn sustain off' : 'Turn sustain on'" @click="setSustain(!sustain)"><span></span></button>
+                </div>
+              </div>
+              <footer class="settings-footer">
+                <p>Piano Room</p>
+                <p>© 2026 Piano Room</p>
+                <p>FluidR3 piano samples · CC BY 3.0</p>
+              </footer>
+            </aside>
+          </transition>
+        </div>
+
+        <section class="dock" :class="{ 'with-sidebar': sidebarOpen, 'with-settings': settingsOpen }" aria-label="Piano controls">
+          <div class="dock-brand" aria-label="Piano" title="Acoustic grand piano samples from FluidR3 GM, CC BY 3.0">
+            <span class="dock-logo" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM8 5.5v8M12 5.5v8M16 5.5v8M6 13.5v5M10 13.5v5M14 13.5v5M18 13.5v5"/></svg>
+            </span>
+            <span class="dock-name">Piano</span>
+          </div>
+          <div class="dock-actions">
+            <button class="dock-action" :class="{ active: sidebarOpen }" type="button" :aria-label="sidebarOpen ? 'Hide song sheet' : 'Show song sheet'" :title="sidebarOpen ? 'Hide song sheet' : 'Show song sheet'" @click="toggleSidebar">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM9 5v14M6.5 9h0M6.5 12h0"/></svg>
+            </button>
+            <button class="dock-action" :class="{ active: settingsOpen }" type="button" :aria-label="settingsOpen ? 'Hide settings' : 'Show settings'" :title="settingsOpen ? 'Hide settings' : 'Show settings'" @click="toggleSettings">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></svg>
+            </button>
+            <button class="dock-action" type="button" aria-label="New chart" title="New chart" @click="newChart">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <span class="dock-divider" aria-hidden="true"></span>
+          <button class="metro-start" :class="{ playing }" type="button" :aria-label="playing ? 'Stop metronome' : 'Start metronome'" @click="toggleMetronome">
+            <svg class="icon play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7 8 5-8 5z"/></svg>
+            <svg class="icon pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v10M15 7v10"/></svg>
+          </button>
+          <div class="metro-center">
+            <div class="bpm-block">
+              <input class="bpm-input" :value="bpm" type="number" min="35" max="240" aria-label="Tempo in beats per minute" @change="setBpm($event.target.value)">
+              <span class="bpm-label">BPM</span>
+            </div>
+            <input class="tempo-slider" :value="bpm" type="range" min="35" max="240" aria-label="Tempo slider" @input="setBpm($event.target.value)">
+            <div class="beats" aria-hidden="true"><span v-for="beat in 4" :key="beat" class="beat" :class="{ active: currentBeat === beat - 1 }"></span></div>
+          </div>
+          <div class="metro-options">
+            <select class="metro-select" v-model="sound" aria-label="Metronome sound">
+              <option value="wood">Woodblock</option>
+              <option value="digital">Digital</option>
+              <option value="soft">Soft tick</option>
+            </select>
+            <button class="tap-button" type="button" @click="tapTempo">TAP</button>
+          </div>
+        </section>
+        <div class="toast" :class="{ show: toastVisible }" role="status">{{ toastMessage }}</div>
+      </div>
+    </div>
+    <script src="vendor/vue.global.prod.js"></script>
+    <script src="vue-app.js"></script>
+  </body>
+</html>
