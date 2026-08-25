@@ -17,6 +17,14 @@ The published URL is `https://page-content.astronauta.dev/p/piano-room/`.
 
 The app runs directly in the browser. There is no compilation step.
 
+## Where new things go
+
+The page extends through registries, not special cases. Every user-facing variation is a row in a registry at the top of `vue-app.js`: a chord quality is a row in `FORMULAS`, an accent in `ACCENT_PRESETS`, a background in `BACKGROUND_PRESETS` (plus one `.background-<id>` composition in `styles.css`), a metronome sound in `METRONOME_SOUNDS` (including its oscillator parameters), an instrument in `INSTRUMENTS`. Menus, validation, storage, and rendering all derive from these rows.
+
+Derive, don't duplicate. Adding a variation must never require a second hand-synced edit — parser lookup, autocomplete, validation, and playback read the registry directly (`FORMULA_BY_SUFFIX`, `QUALITY_SUFFIXES`, and `METRONOME_BY_VALUE` are the pattern). Desync between hand-maintained lists is the class of bug this rule exists to prevent. If a registry row is genuinely not enough, the renderer needs a new type — extend by type, like instruments do, rather than branching on names.
+
+File seams: `index.html` owns templates, `styles.css` owns presentation, `vue-app.js` owns registries and behavior. If `vue-app.js` ever needs splitting, split along the component boundaries (`PianoDiagram`, `ChordDiagram`, `SelectMenu`) with plain script tags; there is no build step. These conventions are the enforcement mechanism — the page has no linter or build gate by design.
+
 ## Component and state structure
 
 `PianoDiagram` renders two octaves of HTML keys. It emits `note-on` on pointer-down or keyboard-down and `note-off` on release. It does not create audio nodes.
@@ -52,7 +60,7 @@ Inversions and octaves use occurrence IDs in the form `barIndex:chordIndex`. Whe
 
 ## Chords and voicings
 
-`FORMULAS` maps quality suffixes to semitone intervals. Add a chord quality there and in `QUALITY_SUFFIXES` so parsing and search stay in sync.
+`FORMULAS` is the single registry for chord qualities, mapping suffixes to semitone intervals. `FORMULA_BY_SUFFIX` (the parser lookup) and `QUALITY_SUFFIXES` (the autocomplete list) both derive from it, so a new chord quality is one new row in `FORMULAS` and nothing else. Row order is cosmetic — the lookup is exact-match — but keep it simple-first; that is also the order of the default suggestion list.
 
 `parseChord` accepts roots, accidentals, qualities, optional parentheses, and slash bass notes. `chordVoicing` creates the root position and rotates the lowest note upward for inversions. Slash bass notes are inserted below the chord.
 

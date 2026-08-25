@@ -5,6 +5,13 @@
   const STORAGE_KEY = "piano-room-state-v2";
   const LEGACY_STORAGE_KEY = "piano-room-state-v1";
   const SHEET_LIBRARY_KEY = "piano-room-sheets-v1";
+  // Extension points. Every user-facing variation is a row in one of the
+  // registries below; menus, validation, storage, and rendering all derive
+  // from those rows. Add variations here, never as special cases elsewhere.
+  // See "Where new things go" in AGENTS.md.
+
+  // Add an instrument here (stable id, label, type, locally hosted samples).
+  // The settings menu and the audio renderer both read this registry.
   const INSTRUMENTS = {
     piano: {
       id: "piano",
@@ -19,6 +26,8 @@
       ]
     }
   };
+  // Add an accent preset here (stable id, label, six-digit hex). themeStyle
+  // derives every accent CSS variable from it; add no accent-specific CSS.
   const ACCENT_PRESETS = [
     { id: "ember", label: "Ember", hex: "#EE754F" },
     { id: "cyan", label: "Cyan", hex: "#43B9D2" },
@@ -27,6 +36,8 @@
     { id: "rose", label: "Rose", hex: "#D96F82" },
     { id: "blue", label: "Blue", hex: "#719EE6" }
   ];
+  // Add a background preset here, plus one flat .background-<id> layer
+  // composition in styles.css. Nothing else needs to change.
   const BACKGROUND_PRESETS = [
     { id: "still", label: "Still" },
     { id: "halo", label: "Halo" },
@@ -34,41 +45,52 @@
     { id: "fold", label: "Fold" },
     { id: "grain", label: "Grain" }
   ];
+  // Add a metronome sound here, including its oscillator parameters. State
+  // validation, the sound menu, and playBeat all read this registry.
   const METRONOME_SOUNDS = [
-    { value: "wood", label: "Woodblock" },
-    { value: "digital", label: "Digital" },
-    { value: "soft", label: "Soft tick" }
+    { value: "wood", label: "Woodblock", type: "triangle", accentHz: 1240, beatHz: 830, peak: 0.22, decay: 0.045 },
+    { value: "digital", label: "Digital", type: "square", accentHz: 980, beatHz: 660, peak: 0.22, decay: 0.045 },
+    { value: "soft", label: "Soft tick", type: "sine", accentHz: 980, beatHz: 660, peak: 0.11, decay: 0.09 }
   ];
+  const METRONOME_BY_VALUE = new Map(METRONOME_SOUNDS.map((item) => [item.value, item]));
   const DAMPER_RELEASE_SECONDS = 0.6;
   const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
   const BLACK_PITCHES = new Set([1, 3, 6, 8, 10]);
   const NOTE_TO_PC = { C: 0, "B#": 0, "C#": 1, Db: 1, D: 2, "D#": 3, Eb: 3, E: 4, Fb: 4, "E#": 5, F: 5, "F#": 6, Gb: 6, G: 7, "G#": 8, Ab: 8, A: 9, "A#": 10, Bb: 10, B: 11, Cb: 11 };
+  // FORMULAS is the single registry for chord qualities. The parser lookup and
+  // the autocomplete list both derive from it, so adding a chord quality is one
+  // new row here and nothing else. Row order is cosmetic (the lookup is an
+  // exact-match Map); keep it simple-first so the file reads the same way the
+  // default suggestion list does.
   const FORMULAS = [
-    { suffix: "maj9", intervals: [0, 4, 7, 11, 14] },
-    { suffix: "mmaj7", intervals: [0, 3, 7, 11] },
-    { suffix: "m7b5", intervals: [0, 3, 6, 10] },
-    { suffix: "dim7", intervals: [0, 3, 6, 9] },
-    { suffix: "7sus4", intervals: [0, 5, 7, 10] },
-    { suffix: "7sus2", intervals: [0, 2, 7, 10] },
-    { suffix: "madd9", intervals: [0, 3, 7, 14] },
-    { suffix: "add9", intervals: [0, 4, 7, 14] },
-    { suffix: "maj7", intervals: [0, 4, 7, 11] },
-    { suffix: "sus4", intervals: [0, 5, 7] },
-    { suffix: "sus2", intervals: [0, 2, 7] },
-    { suffix: "dim", intervals: [0, 3, 6] },
-    { suffix: "aug", intervals: [0, 4, 8] },
-    { suffix: "m9", intervals: [0, 3, 7, 10, 14] },
-    { suffix: "m7", intervals: [0, 3, 7, 10] },
-    { suffix: "m6", intervals: [0, 3, 7, 9] },
-    { suffix: "maj6", intervals: [0, 4, 7, 9] },
-    { suffix: "9", intervals: [0, 4, 7, 10, 14] },
-    { suffix: "7", intervals: [0, 4, 7, 10] },
-    { suffix: "6", intervals: [0, 4, 7, 9] },
+    { suffix: "", intervals: [0, 4, 7] },
     { suffix: "5", intervals: [0, 7] },
+    { suffix: "6", intervals: [0, 4, 7, 9] },
+    { suffix: "7", intervals: [0, 4, 7, 10] },
+    { suffix: "9", intervals: [0, 4, 7, 10, 14] },
     { suffix: "m", intervals: [0, 3, 7] },
-    { suffix: "", intervals: [0, 4, 7] }
+    { suffix: "m6", intervals: [0, 3, 7, 9] },
+    { suffix: "m7", intervals: [0, 3, 7, 10] },
+    { suffix: "m9", intervals: [0, 3, 7, 10, 14] },
+    { suffix: "aug", intervals: [0, 4, 8] },
+    { suffix: "dim", intervals: [0, 3, 6] },
+    { suffix: "add9", intervals: [0, 4, 7, 14] },
+    { suffix: "dim7", intervals: [0, 3, 6, 9] },
+    { suffix: "m7b5", intervals: [0, 3, 6, 10] },
+    { suffix: "maj6", intervals: [0, 4, 7, 9] },
+    { suffix: "maj7", intervals: [0, 4, 7, 11] },
+    { suffix: "maj9", intervals: [0, 4, 7, 11, 14] },
+    { suffix: "sus2", intervals: [0, 2, 7] },
+    { suffix: "sus4", intervals: [0, 5, 7] },
+    { suffix: "7sus2", intervals: [0, 2, 7, 10] },
+    { suffix: "7sus4", intervals: [0, 5, 7, 10] },
+    { suffix: "madd9", intervals: [0, 3, 7, 14] },
+    { suffix: "mmaj7", intervals: [0, 3, 7, 11] }
   ];
-  const QUALITY_SUFFIXES = ["", "m", "5", "7", "7sus2", "7sus4", "maj7", "mmaj7", "m7", "m7b5", "add9", "madd9", "sus4", "sus2", "6", "maj6", "m6", "9", "maj9", "m9", "dim", "dim7", "aug"];
+  const FORMULA_BY_SUFFIX = new Map(FORMULAS.map((item) => [item.suffix, item.intervals]));
+  const QUALITY_SUFFIXES = FORMULAS
+    .map((item) => item.suffix)
+    .sort((left, right) => left.length - right.length || left.localeCompare(right));
   const ROOTS = ["C", "C#", "Db", "D", "Eb", "E", "F", "F#", "Gb", "G", "Ab", "A", "Bb", "B"];
   const CHORD_OPTIONS = ROOTS.flatMap((root) => QUALITY_SUFFIXES.map((quality) => root + quality));
   const DEFAULT_SHEET = "| Em(add9) | Cmaj7    | G/B      | A7sus4  A7 |\n| Em(add9) | Cmaj7/E  | Gmaj7/D  | B7sus4 B7  |";
@@ -114,15 +136,15 @@
     if (!match) return null;
     const rootText = match[1] + match[2];
     const rawQuality = match[3].replace(/[()]/g, "");
-    const aliases = { min: "m", major7: "maj7", "mmaj7": "mmaj7" };
+    const aliases = { min: "m", major7: "maj7" };
     const quality = aliases[rawQuality] || rawQuality;
-    const formula = FORMULAS.find((item) => item.suffix === quality);
-    if (!formula || NOTE_TO_PC[rootText] === undefined) return null;
+    const intervals = FORMULA_BY_SUFFIX.get(quality);
+    if (!intervals || NOTE_TO_PC[rootText] === undefined) return null;
     const bassText = match[4] ? match[4] + match[5] : null;
     if (bassText && NOTE_TO_PC[bassText] === undefined) return null;
     return {
       rootPc: NOTE_TO_PC[rootText],
-      intervals: formula.intervals,
+      intervals,
       bassPc: bassText ? NOTE_TO_PC[bassText] : null
     };
   }
@@ -251,7 +273,7 @@
       customAccent: normalizeHex(stored.customAccent, "#35C6A3"),
       backgroundPreset: BACKGROUND_PRESETS.some((preset) => preset.id === stored.backgroundPreset) ? stored.backgroundPreset : "still",
       bpm: clamp(Number(stored.bpm || legacy.bpm || 92), 35, 240),
-      sound: ["wood", "digital", "soft"].includes(stored.sound || legacy.sound) ? stored.sound || legacy.sound : "wood"
+      sound: METRONOME_BY_VALUE.has(stored.sound || legacy.sound) ? stored.sound || legacy.sound : METRONOME_SOUNDS[0].value
     };
   }
 
@@ -734,7 +756,7 @@
         this.inversions = sheet.inversions && typeof sheet.inversions === "object" ? { ...sheet.inversions } : {};
         this.octaves = sheet.octaves && typeof sheet.octaves === "object" ? { ...sheet.octaves } : {};
         this.bpm = clamp(Number(sheet.bpm || 92), 35, 240);
-        this.sound = ["wood", "digital", "soft"].includes(sheet.sound) ? sheet.sound : "wood";
+        this.sound = METRONOME_BY_VALUE.has(sheet.sound) ? sheet.sound : METRONOME_SOUNDS[0].value;
         this.bars = parseSheet(this.source);
         this.showToast(this.title + " opened");
       },
@@ -951,13 +973,14 @@
         this.setBpm(60000 / (intervals.reduce((sum, value) => sum + value, 0) / intervals.length));
       },
       playBeat(time, beat) {
+        const sound = METRONOME_BY_VALUE.get(this.sound) || METRONOME_SOUNDS[0];
         const oscillator = this.audioContext.createOscillator();
         const gain = this.audioContext.createGain();
-        oscillator.type = this.sound === "digital" ? "square" : this.sound === "soft" ? "sine" : "triangle";
-        oscillator.frequency.value = beat === 0 ? this.sound === "wood" ? 1240 : 980 : this.sound === "wood" ? 830 : 660;
+        oscillator.type = sound.type;
+        oscillator.frequency.value = beat === 0 ? sound.accentHz : sound.beatHz;
         gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.exponentialRampToValueAtTime(this.sound === "soft" ? 0.11 : 0.22, time + 0.004);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + (this.sound === "soft" ? 0.09 : 0.045));
+        gain.gain.exponentialRampToValueAtTime(sound.peak, time + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + sound.decay);
         oscillator.connect(gain);
         gain.connect(this.audioContext.destination);
         oscillator.start(time);
