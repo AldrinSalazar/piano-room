@@ -68,7 +68,7 @@
     { suffix: "m", intervals: [0, 3, 7] },
     { suffix: "", intervals: [0, 4, 7] }
   ];
-  const QUALITY_SUFFIXES = ["", "m", "7", "maj7", "m7", "add9", "madd9", "sus4", "7sus4", "sus2", "6", "m6", "9", "maj9", "dim", "dim7", "m7b5", "aug"];
+  const QUALITY_SUFFIXES = ["", "m", "5", "7", "7sus2", "7sus4", "maj7", "mmaj7", "m7", "m7b5", "add9", "madd9", "sus4", "sus2", "6", "maj6", "m6", "9", "maj9", "m9", "dim", "dim7", "aug"];
   const ROOTS = ["C", "C#", "Db", "D", "Eb", "E", "F", "F#", "Gb", "G", "Ab", "A", "Bb", "B"];
   const CHORD_OPTIONS = ROOTS.flatMap((root) => QUALITY_SUFFIXES.map((quality) => root + quality));
   const DEFAULT_SHEET = "| Em(add9) | Cmaj7    | G/B      | A7sus4  A7 |\n| Em(add9) | Cmaj7/E  | Gmaj7/D  | B7sus4 B7  |";
