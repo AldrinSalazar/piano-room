@@ -34,6 +34,12 @@
     { id: "fold", label: "Fold" },
     { id: "grain", label: "Grain" }
   ];
+  const METRONOME_SOUNDS = [
+    { value: "wood", label: "Woodblock" },
+    { value: "digital", label: "Digital" },
+    { value: "soft", label: "Soft tick" }
+  ];
+  const DAMPER_RELEASE_SECONDS = 0.6;
   const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
   const BLACK_PITCHES = new Set([1, 3, 6, 8, 10]);
   const NOTE_TO_PC = { C: 0, "B#": 0, "C#": 1, Db: 1, D: 2, "D#": 3, Eb: 3, E: 4, Fb: 4, "E#": 5, F: 5, "F#": 6, Gb: 6, G: 7, "G#": 8, Ab: 8, A: 9, "A#": 10, Bb: 10, B: 11, Cb: 11 };
@@ -121,6 +127,8 @@
     };
   }
 
+  let barIdSequence = 0;
+
   function parseSheet(source) {
     const bars = [];
     const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -131,14 +139,67 @@
       for (const chunk of chunks) {
         if (chunk === "%") {
           const previous = bars[bars.length - 1];
-          bars.push({ chords: previous ? previous.chords.slice() : [], repeated: true });
+          bars.push({ id: ++barIdSequence, chords: previous ? previous.chords.slice() : [], repeated: true });
           continue;
         }
         const chords = chunk.split(/\s+/).map((token) => token.trim().replace(/,/g, "")).filter(Boolean);
-        if (chords.length) bars.push({ chords, repeated: false });
+        if (chords.length) bars.push({ id: ++barIdSequence, chords, repeated: false });
       }
     }
     return bars;
+  }
+
+  const dragState = {
+    active: false, pending: false, pointerId: null,
+    card: null, ghost: null, rect: null,
+    startX: 0, startY: 0, lastX: 0, lastY: 0,
+    currentIndex: 0, scrollRaf: 0,
+    onMove: null, onUp: null, onCancel: null
+  };
+  const REDUCED_MOTION = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+
+  function captureBarRects(grid) {
+    const rects = new Map();
+    grid.querySelectorAll(".bar-card").forEach((card) => rects.set(card, card.getBoundingClientRect()));
+    return { rects, scrollY: window.scrollY };
+  }
+
+  function playBarFlip(grid, before) {
+    if (REDUCED_MOTION && REDUCED_MOTION.matches) return;
+    const scrollDelta = window.scrollY - before.scrollY;
+    grid.querySelectorAll(".bar-card").forEach((card) => {
+      const first = before.rects.get(card);
+      if (!first) return;
+      const last = card.getBoundingClientRect();
+      const dx = first.left - last.left;
+      const dy = (first.top - scrollDelta) - last.top;
+      if (!dx && !dy) return;
+      card.animate(
+        [{ transform: "translate(" + dx + "px, " + dy + "px)" }, { transform: "translate(0, 0)" }],
+        { duration: 280, easing: "cubic-bezier(.22, .72, .24, 1)" }
+      );
+    });
+  }
+
+  function dragScrollStep(app) {
+    if (!dragState.active) return;
+    const margin = 72;
+    let delta = 0;
+    if (dragState.lastY < margin) delta = -Math.ceil((margin - dragState.lastY) / 5);
+    else if (dragState.lastY > window.innerHeight - margin) delta = Math.ceil((dragState.lastY - (window.innerHeight - margin)) / 5);
+    if (delta) {
+      window.scrollBy(0, delta);
+      positionDragGhost();
+      app.hitTestDragTarget();
+    }
+    dragState.scrollRaf = requestAnimationFrame(() => dragScrollStep(app));
+  }
+
+  function positionDragGhost() {
+    if (!dragState.ghost) return;
+    const dx = dragState.lastX - dragState.startX;
+    const dy = dragState.lastY - dragState.startY;
+    dragState.ghost.style.transform = "translate(" + dx + "px, " + dy + "px) scale(1.035) rotate(.5deg)";
   }
 
   function chordVoicing(symbol, inversion) {
@@ -364,8 +425,97 @@
     }
   };
 
+  let selectMenuCount = 0;
+
+  const SelectMenu = {
+    props: {
+      modelValue: { type: String, required: true },
+      options: { type: Array, required: true },
+      ariaLabel: { type: String, required: true }
+    },
+    emits: ["update:modelValue"],
+    data() {
+      return { open: false, highlightIndex: 0, uid: ++selectMenuCount };
+    },
+    computed: {
+      listId() { return "select-menu-" + this.uid + "-list"; },
+      selectedLabel() {
+        const selected = this.options.find((option) => option.value === this.modelValue);
+        return selected ? selected.label : "";
+      }
+    },
+    mounted() {
+      document.addEventListener("pointerdown", this.onDocumentPointerdown);
+    },
+    beforeUnmount() {
+      document.removeEventListener("pointerdown", this.onDocumentPointerdown);
+    },
+    methods: {
+      optionId(index) { return this.listId + "-option-" + index; },
+      toggle() { this.open ? this.close() : this.show(); },
+      show() {
+        const selected = this.options.findIndex((option) => option.value === this.modelValue);
+        this.highlightIndex = selected >= 0 ? selected : 0;
+        this.open = true;
+        this.$nextTick(() => {
+          this.$refs.list.focus();
+          this.scrollToActive();
+        });
+      },
+      close(refocus = true) {
+        if (!this.open) return;
+        this.open = false;
+        if (refocus) this.$nextTick(() => this.$refs.trigger.focus());
+      },
+      choose(value) {
+        this.$emit("update:modelValue", value);
+        this.close();
+      },
+      moveHighlight(delta) {
+        const count = this.options.length;
+        this.highlightIndex = mod(this.highlightIndex + delta, count);
+        this.scrollToActive();
+      },
+      scrollToActive() {
+        const active = this.$refs.list && this.$refs.list.querySelector(".select-option.active");
+        if (active) active.scrollIntoView({ block: "nearest" });
+      },
+      onKeydown(event) {
+        if (!this.open) {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.show();
+          }
+          return;
+        }
+        if (event.key === "ArrowDown") { event.preventDefault(); this.moveHighlight(1); }
+        else if (event.key === "ArrowUp") { event.preventDefault(); this.moveHighlight(-1); }
+        else if (event.key === "Home") { event.preventDefault(); this.highlightIndex = 0; this.scrollToActive(); }
+        else if (event.key === "End") { event.preventDefault(); this.highlightIndex = this.options.length - 1; this.scrollToActive(); }
+        else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.choose(this.options[this.highlightIndex].value); }
+        else if (event.key === "Escape") { event.preventDefault(); this.close(); }
+        else if (event.key === "Tab") { this.close(false); }
+      },
+      onDocumentPointerdown(event) {
+        if (this.open && this.$refs.root && !this.$refs.root.contains(event.target)) this.close(false);
+      }
+    },
+    template: `
+      <div class="select-menu" ref="root" @keydown="onKeydown">
+        <button ref="trigger" class="select-trigger" type="button" :aria-label="ariaLabel" aria-haspopup="listbox" :aria-expanded="open ? 'true' : 'false'" :aria-controls="listId" @click="toggle">
+          <span class="select-value">{{ selectedLabel }}</span>
+          <svg class="select-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg>
+        </button>
+        <transition name="select-pop">
+          <ul v-show="open" ref="list" :id="listId" class="select-list" role="listbox" tabindex="-1" :aria-label="ariaLabel" :aria-activedescendant="optionId(highlightIndex)">
+            <li v-for="(option, index) in options" :key="option.value" :id="optionId(index)" class="select-option" :class="{ active: index === highlightIndex, selected: option.value === modelValue }" role="option" :aria-selected="option.value === modelValue ? 'true' : 'false'" @click="choose(option.value)" @mouseenter="highlightIndex = index">{{ option.label }}</li>
+          </ul>
+        </transition>
+      </div>`
+  };
+
   const app = createApp({
-    components: { ChordDiagram },
+    components: { ChordDiagram, SelectMenu },
     data() {
       const state = loadState();
       return {
@@ -379,8 +529,8 @@
         playing: false,
         currentBeat: -1,
         tapTimes: [],
-        draggedBarIndex: null,
-        dragTargetIndex: null
+        draggedBarId: null,
+        armedDeleteId: null
       };
     },
     computed: {
@@ -403,8 +553,19 @@
           .filter((sheet) => sheet.id !== this.currentSheetId)
           .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
       },
+      savedSheetRows() {
+        const current = this.sheets.find((sheet) => sheet.id === this.currentSheetId);
+        const rest = this.otherSheets;
+        return current ? [current, ...rest] : rest;
+      },
       instrumentOptions() {
         return Object.values(INSTRUMENTS);
+      },
+      instrumentSelectOptions() {
+        return this.instrumentOptions.map((instrument) => ({ value: instrument.id, label: instrument.label }));
+      },
+      soundOptions() {
+        return METRONOME_SOUNDS;
       },
       accentOptions() {
         return ACCENT_PRESETS;
@@ -484,6 +645,7 @@
     },
     beforeUnmount() {
       if (this.schedulerTimer) clearInterval(this.schedulerTimer);
+      clearTimeout(this.deleteArmTimer);
       if (this.activeChordVoices) {
         for (const id of this.activeChordVoices.keys()) this.releaseChord(id, 0.02);
       }
@@ -492,11 +654,15 @@
       inversionName,
       toggleSidebar() { this.sidebarOpen = !this.sidebarOpen; },
       toggleSettings() { this.settingsOpen = !this.settingsOpen; },
+      hideSidebars() {
+        this.sidebarOpen = false;
+        this.settingsOpen = false;
+      },
       setSustain(value) {
         this.sustain = Boolean(value);
         if (!this.sustain && this.activeChordVoices) {
           for (const id of this.activeChordVoices.keys()) {
-            if (!this.heldChordIds.has(id)) this.releaseChord(id);
+            if (!this.heldChordIds.has(id)) this.releaseChord(id, DAMPER_RELEASE_SECONDS);
           }
         }
       },
@@ -572,6 +738,28 @@
         this.bars = parseSheet(this.source);
         this.showToast(this.title + " opened");
       },
+      deleteSheet(id) {
+        if (!this.sheets.some((sheet) => sheet.id === id)) return;
+        if (this.armedDeleteId !== id) {
+          this.armedDeleteId = id;
+          clearTimeout(this.deleteArmTimer);
+          this.deleteArmTimer = setTimeout(() => { this.armedDeleteId = null; }, 2600);
+          return;
+        }
+        clearTimeout(this.deleteArmTimer);
+        this.armedDeleteId = null;
+        this.sheets = this.sheets.filter((sheet) => sheet.id !== id);
+        localStorage.setItem(SHEET_LIBRARY_KEY, JSON.stringify(this.sheets));
+        if (id === this.currentSheetId) {
+          this.currentSheetId = sheetId();
+          this.title = "";
+          this.source = "";
+          this.bars = [];
+          this.inversions = {};
+          this.octaves = {};
+        }
+        this.showToast("Sheet deleted");
+      },
       barsToSource(bars) {
         const tokens = bars.map((bar, index) => {
           const previous = bars[index - 1];
@@ -584,11 +772,11 @@
         }
         return lines.join("\n");
       },
-      moveBar(fromIndex, toIndex) {
+      moveBar(fromIndex, toIndex, silent) {
         if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= this.bars.length || toIndex >= this.bars.length) return;
         const reordered = this.bars.map((bar, oldIndex) => ({
           oldIndex,
-          bar: { chords: bar.chords.slice(), repeated: bar.repeated }
+          bar: { ...bar, chords: bar.chords.slice() }
         }));
         const [moved] = reordered.splice(fromIndex, 1);
         reordered.splice(toIndex, 0, moved);
@@ -608,29 +796,113 @@
         this.inversions = nextInversions;
         this.octaves = nextOctaves;
         this.source = this.barsToSource(this.bars);
-        this.showToast("Moved chord #" + (fromIndex + 1) + " to #" + (toIndex + 1));
+        if (!silent) this.showToast("Moved chord #" + (fromIndex + 1) + " to #" + (toIndex + 1));
       },
-      startBarDrag(event, index) {
-        this.draggedBarIndex = index;
-        this.dragTargetIndex = index;
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", String(index));
+      onHandlePointerdown(event, index) {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (dragState.active || dragState.pending) return;
         const card = event.currentTarget.closest(".bar-card");
-        if (card) event.dataTransfer.setDragImage(card, card.offsetWidth / 2, 12);
+        if (!card) return;
+        dragState.pending = true;
+        dragState.pointerId = event.pointerId;
+        dragState.card = card;
+        dragState.rect = card.getBoundingClientRect();
+        dragState.startX = event.clientX;
+        dragState.startY = event.clientY;
+        dragState.lastX = event.clientX;
+        dragState.lastY = event.clientY;
+        dragState.currentIndex = index;
+        dragState.onMove = (pointerEvent) => this.onDragPointermove(pointerEvent);
+        dragState.onUp = (pointerEvent) => this.onDragPointerup(pointerEvent, false);
+        dragState.onCancel = (pointerEvent) => this.onDragPointerup(pointerEvent, true);
+        window.addEventListener("pointermove", dragState.onMove);
+        window.addEventListener("pointerup", dragState.onUp);
+        window.addEventListener("pointercancel", dragState.onCancel);
       },
-      dragOverBar(index) {
-        if (this.draggedBarIndex !== null) this.dragTargetIndex = index;
+      onDragPointermove(event) {
+        if ((!dragState.pending && !dragState.active) || event.pointerId !== dragState.pointerId) return;
+        dragState.lastX = event.clientX;
+        dragState.lastY = event.clientY;
+        if (dragState.pending) {
+          const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+          if (distance < 5) return;
+          this.beginDragGhost();
+        }
+        positionDragGhost();
+        this.hitTestDragTarget();
       },
-      dropBar(index) {
-        if (this.draggedBarIndex !== null) this.moveBar(this.draggedBarIndex, index);
-        this.finishBarDrag();
+      beginDragGhost() {
+        const ghost = dragState.card.cloneNode(true);
+        ghost.classList.add("drag-ghost");
+        ghost.classList.remove("dragging");
+        ghost.style.left = dragState.rect.left + "px";
+        ghost.style.top = dragState.rect.top + "px";
+        ghost.style.width = dragState.rect.width + "px";
+        ghost.style.height = dragState.rect.height + "px";
+        document.body.appendChild(ghost);
+        dragState.ghost = ghost;
+        dragState.active = true;
+        dragState.pending = false;
+        this.draggedBarId = this.bars[dragState.currentIndex].id;
+        document.body.classList.add("drag-in-progress");
+        positionDragGhost();
+        dragState.scrollRaf = requestAnimationFrame(() => dragScrollStep(this));
       },
-      finishBarDrag() {
-        this.draggedBarIndex = null;
-        this.dragTargetIndex = null;
+      hitTestDragTarget() {
+        if (!dragState.active || !this.$refs.barsGrid) return;
+        const grid = this.$refs.barsGrid;
+        const cards = Array.from(grid.children);
+        if (!cards.length) return;
+        const base = cards[0].offsetParent.getBoundingClientRect();
+        const px = dragState.lastX - base.left;
+        const py = dragState.lastY - base.top;
+        let index = -1;
+        for (let i = 0; i < cards.length; i += 1) {
+          const card = cards[i];
+          if (px >= card.offsetLeft && px < card.offsetLeft + card.offsetWidth && py >= card.offsetTop && py < card.offsetTop + card.offsetHeight) {
+            index = i;
+            break;
+          }
+        }
+        if (index === -1 || index === dragState.currentIndex) return;
+        const before = captureBarRects(grid);
+        this.moveBar(dragState.currentIndex, index, true);
+        dragState.currentIndex = index;
+        this.$nextTick(() => playBarFlip(this.$refs.barsGrid, before));
+      },
+      onDragPointerup(event, cancelled) {
+        if (event.pointerId !== undefined && event.pointerId !== dragState.pointerId) return;
+        window.removeEventListener("pointermove", dragState.onMove);
+        window.removeEventListener("pointerup", dragState.onUp);
+        window.removeEventListener("pointercancel", dragState.onCancel);
+        cancelAnimationFrame(dragState.scrollRaf);
+        document.body.classList.remove("drag-in-progress");
+        if (dragState.active) {
+          const ghost = dragState.ghost;
+          const placeholder = dragState.card;
+          const dx = cancelled ? 0 : placeholder.getBoundingClientRect().left - dragState.rect.left;
+          const dy = cancelled ? 0 : placeholder.getBoundingClientRect().top - dragState.rect.top;
+          ghost.style.transition = "transform .18s ease, opacity .18s ease";
+          ghost.style.transform = "translate(" + dx + "px, " + dy + "px) scale(1)";
+          ghost.style.opacity = "0";
+          setTimeout(() => {
+            ghost.remove();
+            placeholder.classList.remove("dragging");
+          }, 190);
+        }
+        dragState.active = false;
+        dragState.pending = false;
+        dragState.ghost = null;
+        dragState.card = null;
+        dragState.pointerId = null;
+        this.draggedBarId = null;
       },
       moveBarWithKey(index, direction) {
-        this.moveBar(index, clamp(index + direction, 0, this.bars.length - 1));
+        const target = clamp(index + direction, 0, this.bars.length - 1);
+        if (target === index || !this.$refs.barsGrid) return;
+        const before = captureBarRects(this.$refs.barsGrid);
+        this.moveBar(index, target);
+        this.$nextTick(() => playBarFlip(this.$refs.barsGrid, before));
       },
       appendChord(symbol) {
         const trimmed = this.source.trimEnd();
@@ -755,7 +1027,7 @@
       },
       stopChordNotes(id) {
         this.heldChordIds.delete(id);
-        if (!this.sustain) this.releaseChord(id);
+        if (!this.sustain) this.releaseChord(id, DAMPER_RELEASE_SECONDS);
       },
       releaseChord(id, releaseSeconds = 0.11) {
         if (!this.audioContext || !this.activeChordVoices) return;

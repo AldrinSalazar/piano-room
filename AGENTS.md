@@ -66,7 +66,7 @@ Pointer-down calls `startChordNotes`. It resumes the shared `AudioContext`, load
 
 Pointer-up calls `stopChordNotes`.
 
-- With sustain off, `releaseChord` applies a short gain release and stops the sample sources.
+- With sustain off, `releaseChord` applies a damper-style gain release (`DAMPER_RELEASE_SECONDS`, about 0.6s of natural decay) and stops the sample sources. Retriggers and instrument switches use much faster releases.
 - With sustain on, the samples continue through their recorded natural decay.
 - Pressing the same chord again releases its previous voice before starting another one.
 

@@ -58,13 +58,19 @@
 
               <aside class="sidebar saved-sidebar">
                 <h3>Sheets saved</h3>
-                <div v-if="otherSheets.length" class="saved-list">
-                  <button v-for="sheet in otherSheets" :key="sheet.id" class="saved-sheet" type="button" @click="openSheet(sheet)">
-                    <span>{{ sheet.title || 'Untitled chart' }}</span>
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
-                  </button>
+                <div v-if="savedSheetRows.length" class="saved-list">
+                  <div v-for="sheet in savedSheetRows" :key="sheet.id" class="saved-row">
+                    <button class="saved-sheet" type="button" :class="{ current: sheet.id === currentSheetId }" :aria-current="sheet.id === currentSheetId ? 'true' : null" :disabled="sheet.id === currentSheetId" @click="openSheet(sheet)">
+                      <span>{{ sheet.title || 'Untitled chart' }}</span>
+                      <span v-if="sheet.id === currentSheetId" class="saved-current-mark" aria-hidden="true"></span>
+                      <svg v-else viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg>
+                    </button>
+                    <button class="saved-delete" type="button" :class="{ armed: armedDeleteId === sheet.id }" :aria-label="(armedDeleteId === sheet.id ? 'Confirm deleting ' : 'Delete ') + (sheet.title || 'Untitled chart')" @click="deleteSheet(sheet.id)">
+                      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M5.8 6l.7 10h7l.7-10"/></svg>
+                    </button>
+                  </div>
                 </div>
-                <p v-else class="saved-empty">Create another sheet to see it here.</p>
+                <p v-else class="saved-empty">No sheets yet.</p>
               </aside>
             </div>
           </transition>
@@ -76,23 +82,18 @@
               </div>
             </div>
 
-            <div v-if="bars.length" class="bars-grid" :style="{ '--bars-per-row': barsPerRow }" aria-live="polite">
+            <div v-if="bars.length" ref="barsGrid" class="bars-grid" :style="{ '--bars-per-row': barsPerRow }" aria-live="polite">
               <article
                 v-for="(bar, barIndex) in bars"
-                :key="barIndex"
+                :key="bar.id"
                 class="bar-card"
-                :class="{ dragging: draggedBarIndex === barIndex, 'drop-target': dragTargetIndex === barIndex && draggedBarIndex !== barIndex }"
-                @dragenter.prevent="dragOverBar(barIndex)"
-                @dragover.prevent="dragOverBar(barIndex)"
-                @drop.prevent="dropBar(barIndex)"
+                :class="{ dragging: draggedBarId === bar.id }"
               >
                 <button
                   class="drag-handle"
                   type="button"
-                  draggable="true"
                   :aria-label="'Drag chord #' + (barIndex + 1) + ' to reorder. Use left and right arrow keys to move it.'"
-                  @dragstart="startBarDrag($event, barIndex)"
-                  @dragend="finishBarDrag"
+                  @pointerdown="onHandlePointerdown($event, barIndex)"
                   @keydown.left.prevent="moveBarWithKey(barIndex, -1)"
                   @keydown.right.prevent="moveBarWithKey(barIndex, 1)"
                 ><span v-for="dot in 5" :key="dot"></span></button>
@@ -123,9 +124,7 @@
                 <h2 class="panel-title">Settings</h2>
                 <label class="setting-field">
                   <span class="field-label">Instrument</span>
-                  <select class="settings-select" :value="instrument" @change="setInstrument($event.target.value)">
-                    <option v-for="option in instrumentOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
-                  </select>
+                  <select-menu :model-value="instrument" class="settings-select-menu" :options="instrumentSelectOptions" aria-label="Instrument" @update:model-value="setInstrument"></select-menu>
                 </label>
 
                 <fieldset class="setting-field settings-group">
@@ -175,12 +174,11 @@
         </div>
 
         <section class="dock" :class="{ 'with-sidebar': sidebarOpen, 'with-settings': settingsOpen }" aria-label="Piano controls">
-          <div class="dock-brand" aria-label="Piano" title="Acoustic grand piano samples from FluidR3 GM, CC BY 3.0">
+          <button class="dock-brand" type="button" aria-label="Hide sidebars" @click="hideSidebars">
             <span class="dock-logo" aria-hidden="true">
               <svg class="icon" viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM8 5.5v8M12 5.5v8M16 5.5v8M6 13.5v5M10 13.5v5M14 13.5v5M18 13.5v5"/></svg>
             </span>
-            <span class="dock-name">Piano</span>
-          </div>
+          </button>
           <div class="dock-actions">
             <button class="dock-action" :class="{ active: sidebarOpen }" type="button" :aria-label="sidebarOpen ? 'Hide song sheet' : 'Show song sheet'" :title="sidebarOpen ? 'Hide song sheet' : 'Show song sheet'" @click="toggleSidebar">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM9 5v14M6.5 9h0M6.5 12h0"/></svg>
@@ -206,11 +204,7 @@
             <div class="beats" aria-hidden="true"><span v-for="beat in 4" :key="beat" class="beat" :class="{ active: currentBeat === beat - 1 }"></span></div>
           </div>
           <div class="metro-options">
-            <select class="metro-select" v-model="sound" aria-label="Metronome sound">
-              <option value="wood">Woodblock</option>
-              <option value="digital">Digital</option>
-              <option value="soft">Soft tick</option>
-            </select>
+            <select-menu v-model="sound" class="metro-select-menu" :options="soundOptions" aria-label="Metronome sound"></select-menu>
             <button class="tap-button" type="button" @click="tapTempo">TAP</button>
           </div>
         </section>
