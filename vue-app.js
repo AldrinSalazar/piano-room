@@ -267,7 +267,7 @@
       inversions: stored.inversions && typeof stored.inversions === "object" ? stored.inversions : {},
       octaves: stored.octaves && typeof stored.octaves === "object" ? stored.octaves : {},
       currentSheetId: typeof stored.currentSheetId === "string" ? stored.currentSheetId : sheetId(),
-      sustain: stored.sustain === true,
+      sustain: stored.sustain !== false,
       instrument: INSTRUMENTS[stored.instrument] ? stored.instrument : "piano",
       accentPreset: ACCENT_PRESETS.some((preset) => preset.id === stored.accentPreset) || stored.accentPreset === "custom" ? stored.accentPreset : "ember",
       customAccent: normalizeHex(stored.customAccent, "#35C6A3"),
