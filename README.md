@@ -1,5 +1,7 @@
 # Piano Room
 
+[Open Piano Room](https://aldrinsalazar.github.io/piano-room/)
+
 I made Piano Room to help me play piano chords for songs I find on the internet. I can paste a chord sheet, see each chord on a two-octave keyboard, and hear how it sounds before playing it myself.
 
 The app supports chord autocomplete, inversions, octave changes, drag-and-drop ordering, saved sheets, a metronome, and several appearance settings. Sheets and preferences stay in the browser's local storage.
