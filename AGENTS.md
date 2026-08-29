@@ -4,8 +4,6 @@
 
 This directory is the complete published Piano Room Agent Page. It is a static frontend app. Do not add a backend, build step, package manager dependency, remote runtime dependency, secret, or authenticated request.
 
-The published URL is `https://page-content.astronauta.dev/p/piano-room/`.
-
 ## Files
 
 - `index.html` contains the Vue templates for the shell, sidebars, chord grid, dock, and settings.
@@ -109,10 +107,6 @@ Honor `prefers-reduced-motion` for every new transition or animation.
 ## Validation and publishing
 
 For updates, prepare files outside the published directory. Validate that Vue mounts, then copy assets and other support files first. Replace `index.html` last.
-
-Published files live at:
-
-`/home/aldrin/pastelito/agent-pages/data/pages/piano-room/`
 
 Use Browserless against the live URL to test:
 
